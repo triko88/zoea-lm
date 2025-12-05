@@ -14,16 +14,11 @@ impl DataSet {
         let tokens = encoder.encode_with_special_tokens(input);
         let token_windows = tokens.windows(dimensions).step_by(dimensions);
         
-        let mut current_window = vec![];
-        
         let device = Device::Cpu;
         
-        for window in token_windows {
-            let window_i64: Vec<i64> = window.iter().map(|&u| u as i64).collect();
-            let current_tensor = Tensor::new(window_i64, &device)?;
-            current_window.push(current_tensor);
-        }
-        
+        let mut current_window = token_windows.map(|window| Tensor::new(window, &device))
+                                    .collect::<Result<Vec<Tensor>, Error>>()?;
+
         let target_window = current_window[1..].to_vec();
         let _ = current_window.pop();
         
