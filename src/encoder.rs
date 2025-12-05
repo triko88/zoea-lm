@@ -41,9 +41,9 @@ impl Encoder {
             
             let len = x.dim(1)? as i64;
             let positions = Tensor::arange(0i64, len, &self.device)?.to_dtype(DType::I64)?.unsqueeze(0)?;
-            let positions_embeddings = pos_layer.forward(&positions)?;
+            let position_embeddings = pos_layer.forward(&positions)?.expand(token_embeddings.shape())?;
             
-            let input_embeddings = token_embeddings.broadcast_add(&positions_embeddings)?;
+            let input_embeddings = (token_embeddings + position_embeddings)?;
             
             result.push(input_embeddings);
         }
