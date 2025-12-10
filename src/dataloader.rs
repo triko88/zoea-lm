@@ -1,4 +1,5 @@
 use candle_core::{Device, Error, Tensor};
+use candle_nn::VarBuilder;
 use rand::seq::SliceRandom;
 use tiktoken_rs::CoreBPE;
 
@@ -13,26 +14,27 @@ impl DataSet {
     pub fn new(input: &str, encoder: CoreBPE, dimensions: usize) -> Result<Self, Error> {
         let tokens = encoder.encode_with_special_tokens(input);
         let token_windows = tokens.windows(dimensions).step_by(dimensions);
-        
+
         let device = Device::Cpu;
-        
-        let mut current_window = token_windows.map(|window| Tensor::new(window, &device))
-                                    .collect::<Result<Vec<Tensor>, Error>>()?;
+
+        let mut current_window = token_windows
+            .map(|window| Tensor::new(window, &device))
+            .collect::<Result<Vec<Tensor>, Error>>()?;
 
         let target_window = current_window[1..].to_vec();
         let _ = current_window.pop();
-        
+
         Ok(Self {
             current_window,
             target_window,
             vocab_size: tokens.iter().max().unwrap() + 1,
         })
     }
-    
+
     pub fn len(&self) -> usize {
         self.current_window.len()
     }
-    
+
     pub fn get(&self, idx: usize) -> Option<(&Tensor, &Tensor)> {
         if idx >= self.current_window.len() {
             None
@@ -42,20 +44,26 @@ impl DataSet {
     }
 }
 
-pub struct DataLoader {
-    dataset:        DataSet,
-    batch_size:     usize,
-    shuffle:        bool,
-    drop_last:      bool,
-    indeces:       Vec<usize>,
-    current_idx:    usize,
-    device:         Device,
+pub struct DataLoader<'a> {
+    dataset: DataSet,
+    batch_size: usize,
+    shuffle: bool,
+    drop_last: bool,
+    indeces: Vec<usize>,
+    current_idx: usize,
+    pub builder: VarBuilder<'a>,
 }
 
-impl DataLoader {
-    pub fn new(dataset: DataSet, batch_size: usize, shuffle: bool, drop_last: bool, device: Device) -> Self {
+impl<'a> DataLoader<'a> {
+    pub fn new(
+        dataset: DataSet,
+        batch_size: usize,
+        shuffle: bool,
+        drop_last: bool,
+        builder: &'a VarBuilder,
+    ) -> Self {
         let indeces: Vec<usize> = (0..dataset.len()).collect();
-        
+
         let mut loader = Self {
             dataset,
             batch_size,
@@ -63,21 +71,21 @@ impl DataLoader {
             drop_last,
             indeces,
             current_idx: 0,
-            device
+            builder: builder.clone(),
         };
-        
-        if shuffle {
+
+        if loader.shuffle {
             loader.shuffle_indeces();
         }
-        
+
         loader
     }
-    
+
     fn shuffle_indeces(&mut self) {
         let mut rng = rand::rng();
         self.indeces.shuffle(&mut rng);
     }
-    
+
     pub fn reset(&mut self) {
         self.current_idx = 0;
 
@@ -85,7 +93,7 @@ impl DataLoader {
             self.shuffle_indeces();
         }
     }
-    
+
     pub fn count_batches(&self) -> usize {
         let count = if self.drop_last {
             self.dataset.len()
@@ -95,12 +103,12 @@ impl DataLoader {
 
         count / self.batch_size
     }
-    
+
     pub fn next_batch(&mut self) -> Option<(Tensor, Tensor)> {
         if self.current_idx >= self.dataset.len() {
             return None;
         }
-        
+
         let remaining = self.dataset.len() - self.current_idx;
         let actual_batch_size = if remaining < self.batch_size {
             if self.drop_last {
@@ -110,7 +118,7 @@ impl DataLoader {
         } else {
             self.batch_size
         };
-        
+
         let mut current_batch = Vec::with_capacity(actual_batch_size);
         let mut target_batch = Vec::with_capacity(actual_batch_size);
 
@@ -122,18 +130,18 @@ impl DataLoader {
 
             self.current_idx += 1;
         }
-        
+
         let current_refs: Vec<&Tensor> = current_batch.iter().collect();
         let target_refs: Vec<&Tensor> = target_batch.iter().collect();
-        
+
         let current_tensor = Tensor::stack(&current_refs, 0).unwrap();
         let target_tensor = Tensor::stack(&target_refs, 0).unwrap();
-        
+
         Some((current_tensor, target_tensor))
     }
 }
 
-impl Iterator for DataLoader {
+impl Iterator for DataLoader<'_> {
     type Item = (Tensor, Tensor);
 
     fn next(&mut self) -> Option<Self::Item> {
