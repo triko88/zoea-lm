@@ -7,7 +7,6 @@ pub struct Encoder {
     vocab_size: usize,
     context_length: usize,
     output_dimensions: usize,
-    data_type: DType,
 }
 
 impl Encoder {
@@ -16,7 +15,6 @@ impl Encoder {
             vocab_size,
             context_length,
             output_dimensions,
-            data_type: DType::F32,
         }
     }
 
