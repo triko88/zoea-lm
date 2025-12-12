@@ -66,7 +66,8 @@ impl SelfAttention {
             .to_dtype(tensor.dtype())?
             .broadcast_as(tensor.shape())?;
 
-        self.masked_fill(&mask, f32::NEG_INFINITY)
+        let causal_mask = mask.log()?;
+        tensor.broadcast_add(&causal_mask.broadcast_as(tensor.shape())?)
     }
 
     fn triu(&self, tensor: &Tensor) -> Result<Tensor, Error> {
@@ -84,11 +85,7 @@ impl SelfAttention {
             .to_dtype(tensor.dtype())?
             .broadcast_as(tensor.shape())?;
 
-        self.masked_fill(&mask, f32::NEG_INFINITY)
-    }
-
-    fn masked_fill(&self, mask: &Tensor, value: f32) -> Result<Tensor, Error> {
-        let on_true = Tensor::new(value, mask.device())?.broadcast_as(mask.shape())?;
-        mask.where_cond(&on_true, mask)
+        let causal_mask = mask.log()?;
+        tensor.broadcast_add(&causal_mask.broadcast_as(tensor.shape())?)
     }
 }
