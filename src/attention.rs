@@ -34,13 +34,13 @@ impl SelfAttention {
         let keys = self.key_weights.forward(input)?;
         let values = self.value_weights.forward(input)?;
 
-        let attn_scores = queries.matmul(&keys.t()?)?;
-        let masked_scores = self.tril(&attn_scores)?;
+        let attn_scores = queries.matmul(&keys.transpose(1, 2)?)?;
+        let attn_scores = self.tril(&attn_scores)?;
 
         let dim_keys = *keys.dims().last().unwrap() as f64;
         let scale = dim_keys.sqrt();
 
-        let scaled_scores = (masked_scores / scale)?;
+        let scaled_scores = (attn_scores / scale)?;
 
         let attn_weights = softmax(&scaled_scores, D::Minus1)?;
 
@@ -66,7 +66,7 @@ impl SelfAttention {
             .to_dtype(tensor.dtype())?
             .broadcast_as(tensor.shape())?;
 
-        tensor * mask
+        self.masked_fill(&mask, f32::NEG_INFINITY)
     }
 
     fn triu(&self, tensor: &Tensor) -> Result<Tensor, Error> {
@@ -84,6 +84,11 @@ impl SelfAttention {
             .to_dtype(tensor.dtype())?
             .broadcast_as(tensor.shape())?;
 
-        tensor * mask
+        self.masked_fill(&mask, f32::NEG_INFINITY)
+    }
+
+    fn masked_fill(&self, mask: &Tensor, value: f32) -> Result<Tensor, Error> {
+        let on_true = Tensor::new(value, mask.device())?.broadcast_as(mask.shape())?;
+        mask.where_cond(&on_true, mask)
     }
 }
