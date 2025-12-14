@@ -32,8 +32,14 @@ fn main() -> Result<(), Error> {
 
     println!("input embeddings: generated...");
     let attention_dimesion = input_embeddings.dim(2)?;
-    let self_attn = SelfAttention::new(attention_dimesion, output_dim, 0.1, &builder)?;
-    let context_vector = self_attn.forward(&input_embeddings)?;
+    let self_attn = SelfAttention::new(
+        attention_dimesion,
+        output_dim,
+        context_length,
+        0.1,
+        &builder,
+    )?;
+    let context_vector = self_attn.forward(&input_embeddings, true)?;
 
     println!("{:?}", context_vector);
 
