@@ -22,6 +22,7 @@ fn main() -> Result<(), Error> {
     let output_dim = 256;
     let context_length = 1024;
     let batch_size = 8;
+    let head_count = 8;
     let builder = VarBuilder::zeros(DType::F32, &Device::Cpu);
 
     let data_loader = DataLoader::new(data_set, batch_size, true, true, &builder);
@@ -37,6 +38,7 @@ fn main() -> Result<(), Error> {
         output_dim,
         context_length,
         0.1,
+        head_count,
         &builder,
     )?;
     let context_vector = self_attn.forward(&input_embeddings, true)?;

@@ -8,6 +8,8 @@ pub struct SelfAttention {
     key_weights: Linear,
     value_weights: Linear,
     dropout: Dropout,
+    num_heads: usize,
+    head_dim: usize,
     mask: Tensor,
 }
 
@@ -17,6 +19,7 @@ impl SelfAttention {
         dim_out: usize,
         context_length: usize,
         dropout: f32,
+        num_heads: usize,
         vb: &VarBuilder,
     ) -> Result<Self, Error> {
         let query_weights = linear(dim_in, dim_out, vb.pp("queries"))?;
@@ -27,23 +30,41 @@ impl SelfAttention {
 
         let mask = Tensor::triu2(context_length, DType::U8, vb.device())?;
 
+        let head_dim = dim_out / num_heads;
+
         Ok(Self {
             query_weights,
             key_weights,
             value_weights,
             dropout,
+            num_heads,
+            head_dim,
             mask,
         })
     }
 
     pub fn forward(&self, input: &Tensor, train: bool) -> Result<Tensor, Error> {
+        let batch_size = input.dims()[0];
         let num_tokens = input.dims()[1];
 
         let queries = self.query_weights.forward(input)?;
         let keys = self.key_weights.forward(input)?;
         let values = self.value_weights.forward(input)?;
 
-        let attn_scores = queries.matmul(&keys.transpose(1, 2)?)?;
+        let queries = queries
+            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?
+            .contiguous()?;
+        let keys = keys
+            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?
+            .contiguous()?;
+        let values = values
+            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?
+            .contiguous()?;
+
+        let attn_scores = queries.matmul(&keys.transpose(2, 3)?)?;
 
         let mask = self.mask.i((..num_tokens, ..num_tokens))?;
         let mask = mask.broadcast_as(attn_scores.shape())?;
@@ -62,8 +83,12 @@ impl SelfAttention {
 
         let attn_weights = self.dropout.forward(&attn_weights, train)?;
 
-        let context_vector = attn_weights.matmul(&values)?;
+        let context_vector = (attn_weights.matmul(&values)?).transpose(1, 2)?;
 
-        Ok(context_vector)
+        context_vector.contiguous()?.reshape((
+            batch_size,
+            num_tokens,
+            self.head_dim * self.num_heads,
+        ))
     }
 }
