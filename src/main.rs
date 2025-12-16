@@ -58,7 +58,9 @@ fn load_weights(
 
 fn main() -> Result<(), Error> {
     let encoder = o200k_base().unwrap();
-    let data = fs::read_to_string("test-files/small-text-sample.txt")?;
+    let input_path = std::env::args().nth(1).unwrap();
+
+    let data = fs::read_to_string(input_path)?;
     let data_set = DataSet::new(data.as_str(), encoder, 4)?;
 
     // Configuration
