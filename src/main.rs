@@ -19,41 +19,40 @@ fn load_weights(
     context_length: usize,
     device: Device,
 ) -> Result<HashMap<String, Tensor>, Error> {
-    let mut weight_map: HashMap<String, Tensor> = HashMap::new();
-    weight_map.insert(
-        "token_embeddings.weight".to_string(),
-        Tensor::randn(0.0, 0.2, (input_dim, output_dim), &device)?,
-    );
-    weight_map.insert(
-        "pos_embeddings.weight".to_string(),
-        Tensor::randn(0.0, 0.2, (context_length, output_dim), &device)?,
-    );
-    weight_map.insert(
-        "queries.weight".to_string(),
-        Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
-    );
-    weight_map.insert(
-        "queries.bias".to_string(),
-        Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
-    );
-    weight_map.insert(
-        "keys.weight".to_string(),
-        Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
-    );
-    weight_map.insert(
-        "keys.bias".to_string(),
-        Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
-    );
-    weight_map.insert(
-        "values.weight".to_string(),
-        Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
-    );
-    weight_map.insert(
-        "values.bias".to_string(),
-        Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
-    );
-
-    Ok(weight_map)
+    Ok(HashMap::from([
+        (
+            "token_embeddings.weight".to_string(),
+            Tensor::randn(0.0, 0.2, (input_dim, output_dim), &device)?,
+        ),
+        (
+            "pos_embeddings.weight".to_string(),
+            Tensor::randn(0.0, 0.2, (context_length, output_dim), &device)?,
+        ),
+        (
+            "queries.weight".to_string(),
+            Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
+        ),
+        (
+            "queries.bias".to_string(),
+            Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
+        ),
+        (
+            "keys.weight".to_string(),
+            Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
+        ),
+        (
+            "keys.bias".to_string(),
+            Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
+        ),
+        (
+            "values.weight".to_string(),
+            Tensor::randn(0.0, 0.2, (output_dim, output_dim), &device)?,
+        ),
+        (
+            "values.bias".to_string(),
+            Tensor::randn(0.0, 0.0, (output_dim,), &device)?,
+        ),
+    ]))
 }
 
 fn main() -> Result<(), Error> {
