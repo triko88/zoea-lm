@@ -1,150 +1,111 @@
-use candle_core::{Device, Error, Tensor};
-use candle_nn::VarBuilder;
-use rand::seq::SliceRandom;
+use burn::{
+    data::{
+        dataloader::{DataLoader, DataLoaderBuilder, batcher::Batcher},
+        dataset::{self, Dataset, InMemDataset},
+    },
+    tensor::{Int, Tensor, TensorData, backend::Backend},
+};
+use std::sync::Arc;
 use tiktoken_rs::CoreBPE;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
+pub struct DataItem {
+    pub current_window: Vec<u32>,
+    pub target_window: Vec<u32>,
+}
+
 pub struct DataSet {
-    pub current_window: Vec<Tensor>,
-    pub target_window: Vec<Tensor>,
-    pub vocab_size: u32,
+    pub data: InMemDataset<DataItem>,
 }
 
 impl DataSet {
-    pub fn new(input: &str, encoder: CoreBPE, dimensions: usize) -> Result<Self, Error> {
-        let tokens = encoder.encode_with_special_tokens(input);
-        let token_windows = tokens.windows(dimensions).step_by(dimensions);
+    pub fn new(input: &str, encoder: CoreBPE, window_size: usize, stride: usize) -> Self {
+        let raw_tokens = encoder.encode_with_special_tokens(input);
 
-        let device = Device::Cpu;
-
-        let mut current_window = token_windows
-            .map(|window| Tensor::new(window, &device))
-            .collect::<Result<Vec<Tensor>, Error>>()?;
+        let mut current_window = raw_tokens
+            .windows(window_size)
+            .step_by(stride)
+            .map(|chunk| chunk.to_vec())
+            .collect::<Vec<Vec<u32>>>();
 
         let target_window = current_window[1..].to_vec();
+
         let _ = current_window.pop();
 
-        Ok(Self {
-            current_window,
-            target_window,
-            vocab_size: tokens.iter().max().unwrap() + 1,
-        })
-    }
+        let data = current_window
+            .into_iter()
+            .zip(target_window.into_iter())
+            .map(|(current_window, target_window)| DataItem {
+                current_window,
+                target_window,
+            })
+            .collect::<Vec<_>>();
 
-    pub fn len(&self) -> usize {
-        self.current_window.len()
-    }
-
-    pub fn get(&self, idx: usize) -> Option<(&Tensor, &Tensor)> {
-        if idx >= self.current_window.len() {
-            None
-        } else {
-            Some((&self.current_window[idx], &self.target_window[idx]))
+        Self {
+            data: InMemDataset::new(data),
         }
     }
 }
 
-pub struct DataLoader<'a> {
-    dataset: DataSet,
+impl Dataset<DataItem> for DataSet {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn get(&self, idx: usize) -> Option<DataItem> {
+        self.data.get(idx)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DataBatch<B: Backend> {
+    pub inputs: Tensor<B, 2, Int>,
+    pub targets: Tensor<B, 2, Int>,
+}
+
+pub struct DataBatcher<B: Backend> {
+    device: B::Device,
+}
+
+impl<B: Backend> Batcher<B, DataItem, DataBatch<B>> for DataBatcher<B> {
+    fn batch(&self, batch: Vec<DataItem>, device: &B::Device) -> DataBatch<B> {
+        let batch_size = batch.len();
+        let seq_len = batch[0].current_window.len();
+
+        let device: &B::Device = device;
+
+        let mut input_data = Vec::with_capacity(batch_size * seq_len);
+        let mut target_data = Vec::with_capacity(batch_size * seq_len);
+
+        for item in batch {
+            input_data.extend_from_slice(&item.current_window);
+            target_data.extend_from_slice(&item.target_window);
+        }
+
+        let shape = [batch_size, seq_len];
+
+        let inputs = Tensor::from_data(TensorData::new(input_data, shape), device);
+        let targets = Tensor::from_data(TensorData::new(target_data, shape), device);
+
+        DataBatch { inputs, targets }
+    }
+}
+
+pub fn create_dataloader<B: Backend>(
+    text: &str,
+    encoder: CoreBPE,
     batch_size: usize,
-    shuffle: bool,
-    drop_last: bool,
-    indeces: Vec<usize>,
-    current_idx: usize,
-    pub builder: VarBuilder<'a>,
-}
+    max_length: usize,
+    stride: usize,
+    num_workers: usize,
+) -> Arc<dyn DataLoader<B, DataBatch<B>>> {
+    let dataset = DataSet::new(text, encoder, max_length, stride);
+    let dataset = Arc::new(dataset.data);
 
-impl<'a> DataLoader<'a> {
-    pub fn new(
-        dataset: DataSet,
-        batch_size: usize,
-        shuffle: bool,
-        drop_last: bool,
-        builder: &'a VarBuilder,
-    ) -> Self {
-        let indeces: Vec<usize> = (0..dataset.len()).collect();
-
-        let mut loader = Self {
-            dataset,
-            batch_size,
-            shuffle,
-            drop_last,
-            indeces,
-            current_idx: 0,
-            builder: builder.clone(),
-        };
-
-        if loader.shuffle {
-            loader.shuffle_indeces();
-        }
-
-        loader
-    }
-
-    fn shuffle_indeces(&mut self) {
-        let mut rng = rand::rng();
-        self.indeces.shuffle(&mut rng);
-    }
-
-    pub fn reset(&mut self) {
-        self.current_idx = 0;
-
-        if self.shuffle {
-            self.shuffle_indeces();
-        }
-    }
-
-    pub fn count_batches(&self) -> usize {
-        let count = if self.drop_last {
-            self.dataset.len()
-        } else {
-            self.dataset.len() + self.batch_size - 1
-        };
-
-        count / self.batch_size
-    }
-
-    pub fn next_batch(&mut self) -> Option<(Tensor, Tensor)> {
-        if self.current_idx >= self.dataset.len() {
-            return None;
-        }
-
-        let remaining = self.dataset.len() - self.current_idx;
-        let actual_batch_size = if remaining < self.batch_size {
-            if self.drop_last {
-                return None;
-            }
-            remaining
-        } else {
-            self.batch_size
-        };
-
-        let mut current_batch = Vec::with_capacity(actual_batch_size);
-        let mut target_batch = Vec::with_capacity(actual_batch_size);
-
-        for _ in 0..actual_batch_size {
-            let idx = self.indeces[self.current_idx];
-            let (current, target) = self.dataset.get(idx).unwrap();
-            current_batch.push(current.clone());
-            target_batch.push(target.clone());
-
-            self.current_idx += 1;
-        }
-
-        let current_refs: Vec<&Tensor> = current_batch.iter().collect();
-        let target_refs: Vec<&Tensor> = target_batch.iter().collect();
-
-        let current_tensor = Tensor::stack(&current_refs, 0).unwrap();
-        let target_tensor = Tensor::stack(&target_refs, 0).unwrap();
-
-        Some((current_tensor, target_tensor))
-    }
-}
-
-impl Iterator for DataLoader<'_> {
-    type Item = (Tensor, Tensor);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_batch()
-    }
+    DataLoaderBuilder::new(DataBatcher {
+        device: B::Device::default(),
+    })
+    .batch_size(batch_size)
+    .num_workers(num_workers)
+    .build(dataset)
 }

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-candle-core = { version = "0.9.1", features = ["mkl"] }
-candle-nn = { version = "0.9.1", features = ["mkl"] }
+burn = { version = "0.19.1", features = ["webgpu", "dataset"] }
 rand = "0.9.2"
 tiktoken-rs = "0.9.1"

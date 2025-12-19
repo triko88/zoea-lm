@@ -1,94 +1,88 @@
-use core::f32;
+use core::num;
+use std::f32::NEG_INFINITY;
 
-use candle_core::{D, DType, Error, IndexOp, Shape, Tensor};
-use candle_nn::{Dropout, Linear, Module, VarBuilder, linear, ops::softmax};
+use burn::{
+    Tensor,
+    nn::{Dropout, Linear, LinearConfig},
+    prelude::Backend,
+    tensor::{Bool, Shape, activation},
+};
 
-pub struct SelfAttention {
-    query_weights: Linear,
-    key_weights: Linear,
-    value_weights: Linear,
-    dropout: Dropout,
-    num_heads: usize,
-    head_dim: usize,
-    mask: Tensor,
+use crate::attention;
+
+pub struct MultiHeadAttentionConfig {
+    pub input_dimensions: usize,
+    pub output_dimensions: usize,
+    pub context_length: usize,
+    pub num_heads: usize,
+    pub drop_out: f64,
+    pub with_bias: bool,
 }
 
-impl SelfAttention {
-    pub fn new(
-        dim_in: usize,
-        dim_out: usize,
-        context_length: usize,
-        dropout: f32,
-        num_heads: usize,
-        vb: &VarBuilder,
-    ) -> Result<Self, Error> {
-        let query_weights = linear(dim_in, dim_out, vb.pp("queries"))?;
-        let key_weights = linear(dim_in, dim_out, vb.pp("keys"))?;
-        let value_weights = linear(dim_in, dim_out, vb.pp("values"))?;
+pub struct MultiHeadAttention<B: Backend> {
+    query_weights: Linear<B>,
+    key_weights: Linear<B>,
+    value_weights: Linear<B>,
+    head_dimesnion: usize,
+    out_projection: Linear<B>,
+    mask: Tensor<B, 2, Bool>,
+    dropout: Dropout,
+}
 
-        let dropout = Dropout::new(dropout);
+impl<B: Backend> MultiHeadAttention<B> {
+    pub fn new(config: MultiHeadAttentionConfig) -> Self {
+        let linear_config = LinearConfig::new(config.input_dimensions, config.output_dimensions)
+            .with_bias(config.with_bias);
 
-        let mask = Tensor::triu2(context_length, DType::U8, vb.device())?;
+        let device = B::Device::default();
 
-        let head_dim = dim_out / num_heads;
+        let ones = Tensor::<B, 2>::ones([config.context_length, config.context_length], &device);
+        let mask = ones.triu(1).bool();
 
-        Ok(Self {
-            query_weights,
-            key_weights,
-            value_weights,
-            dropout,
-            num_heads,
-            head_dim,
+        let out_projection =
+            LinearConfig::new(config.output_dimensions, config.input_dimensions).init(&device);
+
+        Self {
+            query_weights: linear_config.init(&device),
+            key_weights: linear_config.init(&device),
+            value_weights: linear_config.init(&device),
+            head_dimesnion: config.output_dimensions / config.num_heads,
+            out_projection,
             mask,
-        })
+            dropout: Dropout {
+                prob: config.drop_out,
+            },
+        }
     }
 
-    pub fn forward(&self, input: &Tensor, train: bool) -> Result<Tensor, Error> {
-        let batch_size = input.dims()[0];
-        let num_tokens = input.dims()[1];
+    pub fn forward(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
+        let mut dims = x.shape().dims::<2>().to_vec();
+        let num_tokens = dims[1];
 
-        let queries = self.query_weights.forward(input)?;
-        let keys = self.key_weights.forward(input)?;
-        let values = self.value_weights.forward(input)?;
+        dims.push(self.head_dimesnion);
 
-        let queries = queries
-            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
-            .transpose(1, 2)?
-            .contiguous()?;
-        let keys = keys
-            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
-            .transpose(1, 2)?
-            .contiguous()?;
-        let values = values
-            .reshape((batch_size, num_tokens, self.num_heads, self.head_dim))?
-            .transpose(1, 2)?
-            .contiguous()?;
+        let shape = Shape { dims: dims };
 
-        let attn_scores = queries.matmul(&keys.transpose(2, 3)?)?;
+        let query = self.query_weights.forward(x.clone()).reshape(shape.clone());
+        let key = self.key_weights.forward(x.clone()).reshape(shape.clone());
+        let value = self.value_weights.forward(x).reshape(shape);
 
-        let mask = self.mask.i((..num_tokens, ..num_tokens))?;
-        let mask = mask.broadcast_as(attn_scores.shape())?;
+        let query = query.swap_dims(1, 2);
+        let key = key.swap_dims(1, 2);
+        let value = value.swap_dims(1, 2);
 
-        let neg_inf =
-            Tensor::new(f32::NEG_INFINITY, input.device())?.broadcast_as(attn_scores.shape())?;
+        let scale = (self.head_dimesnion as f64).sqrt();
 
-        let attn_scores = mask.where_cond(&attn_scores, &neg_inf)?;
+        let mut attn_scores = query.matmul(key.swap_dims(2, 3)) / scale;
+        let mask = self.mask.clone().slice([..num_tokens, ..num_tokens]);
 
-        let dim_keys = *keys.dims().last().unwrap() as f64;
-        let scale = dim_keys.sqrt();
+        attn_scores = attn_scores.mask_fill(mask, NEG_INFINITY);
 
-        let scaled_scores = (attn_scores / scale)?;
+        let attn_weights = activation::softmax(attn_scores, 3);
+        let attn_weights = self.dropout.forward(attn_weights);
 
-        let attn_weights = softmax(&scaled_scores, D::Minus1)?;
+        let context_vector = attn_weights.matmul(value).swap_dims(1, 2).flatten(2, 3);
 
-        let attn_weights = self.dropout.forward(&attn_weights, train)?;
-
-        let context_vector = (attn_weights.matmul(&values)?).transpose(1, 2)?;
-
-        context_vector.contiguous()?.reshape((
-            batch_size,
-            num_tokens,
-            self.head_dim * self.num_heads,
-        ))
+        self.out_projection.forward(context_vector)
     }
 }
