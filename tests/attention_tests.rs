@@ -10,14 +10,7 @@ type TestBackend = NdArray<f32>;
 fn test_attention_output_bounded() {
     let device = Default::default();
 
-    let config = MultiHeadAttentionConfig {
-        input_dimensions: 64,
-        output_dimensions: 64,
-        context_length: 32,
-        num_heads: 4,
-        drop_out: 0.0,
-        with_bias: false,
-    };
+    let config = MultiHeadAttentionConfig::new();
 
     let attention = MultiHeadAttention::<TestBackend>::new(config);
 
@@ -51,14 +44,9 @@ fn test_attention_head_configurations() {
     ];
 
     for (dimensions, num_heads) in configs {
-        let config = MultiHeadAttentionConfig {
-            input_dimensions: dimensions,
-            output_dimensions: dimensions,
-            context_length: 32,
-            num_heads,
-            drop_out: 0.0,
-            with_bias: false,
-        };
+        let config = MultiHeadAttentionConfig::new()
+            .with_input_dimensions(dimensions)
+            .with_output_dimensions(dimensions);
 
         let attention = MultiHeadAttention::<TestBackend>::new(config);
 
@@ -81,14 +69,11 @@ fn test_attention_head_configurations() {
 fn test_attention_causality() {
     let device = Default::default();
 
-    let config = MultiHeadAttentionConfig {
-        input_dimensions: 32,
-        output_dimensions: 32,
-        context_length: 16,
-        num_heads: 2,
-        drop_out: 0.0,
-        with_bias: false,
-    };
+    let config = MultiHeadAttentionConfig::new()
+        .with_input_dimensions(32)
+        .with_output_dimensions(32)
+        .with_context_length(16)
+        .with_num_heads(2);
 
     let attention = MultiHeadAttention::<TestBackend>::new(config);
 
@@ -138,19 +123,8 @@ fn test_attention_causality() {
 fn test_attention_with_bias() {
     let device = Default::default();
 
-    let unbiased_config = MultiHeadAttentionConfig {
-        input_dimensions: 64,
-        output_dimensions: 64,
-        context_length: 16,
-        num_heads: 4,
-        drop_out: 0.0,
-        with_bias: false,
-    };
-
-    let biased_config = MultiHeadAttentionConfig {
-        with_bias: true,
-        ..unbiased_config
-    };
+    let unbiased_config = MultiHeadAttentionConfig::new();
+    let biased_config = MultiHeadAttentionConfig::new().with_bias(true);
 
     let unbiased_attention = MultiHeadAttention::<TestBackend>::new(unbiased_config);
     let biased_attention = MultiHeadAttention::<TestBackend>::new(biased_config);
@@ -171,14 +145,7 @@ fn test_attention_with_bias() {
 fn test_attention_single_token() {
     let device = Default::default();
 
-    let config = MultiHeadAttentionConfig {
-        input_dimensions: 64,
-        output_dimensions: 64,
-        context_length: 16,
-        num_heads: 4,
-        drop_out: 0.0,
-        with_bias: false,
-    };
+    let config = MultiHeadAttentionConfig::new();
 
     let attention = MultiHeadAttention::<TestBackend>::new(config);
 

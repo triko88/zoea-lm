@@ -2,20 +2,35 @@ use std::f32::NEG_INFINITY;
 
 use burn::{
     Tensor,
-    nn::{Dropout, Linear, LinearConfig},
+    config::Config,
+    module::Module,
+    nn::{Dropout, DropoutConfig, Linear, LinearConfig},
     prelude::Backend,
     tensor::{Bool, Shape, activation},
 };
 
+#[derive(Config, Debug)]
 pub struct MultiHeadAttentionConfig {
+    #[config(default = 64)]
     pub input_dimensions: usize,
+
+    #[config(default = 64)]
     pub output_dimensions: usize,
+
+    #[config(default = 16)]
     pub context_length: usize,
+
+    #[config(default = 4)]
     pub num_heads: usize,
-    pub drop_out: f64,
-    pub with_bias: bool,
+
+    #[config(default = 0.0)]
+    pub dropout: f64,
+
+    #[config(default = false)]
+    pub bias: bool,
 }
 
+#[derive(Module, Debug)]
 pub struct MultiHeadAttention<B: Backend> {
     query_weights: Linear<B>,
     key_weights: Linear<B>,
@@ -29,7 +44,7 @@ pub struct MultiHeadAttention<B: Backend> {
 impl<B: Backend> MultiHeadAttention<B> {
     pub fn new(config: MultiHeadAttentionConfig) -> Self {
         let linear_config = LinearConfig::new(config.input_dimensions, config.output_dimensions)
-            .with_bias(config.with_bias);
+            .with_bias(config.bias);
 
         let device = B::Device::default();
 
@@ -49,9 +64,7 @@ impl<B: Backend> MultiHeadAttention<B> {
             head_dimesnion: config.output_dimensions / config.num_heads,
             out_projection,
             mask,
-            dropout: Dropout {
-                prob: config.drop_out,
-            },
+            dropout: DropoutConfig::new(config.dropout).init(),
         }
     }
 
