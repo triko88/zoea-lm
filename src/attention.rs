@@ -1,4 +1,3 @@
-use core::num;
 use std::f32::NEG_INFINITY;
 
 use burn::{
@@ -7,8 +6,6 @@ use burn::{
     prelude::Backend,
     tensor::{Bool, Shape, activation},
 };
-
-use crate::attention;
 
 pub struct MultiHeadAttentionConfig {
     pub input_dimensions: usize,
@@ -25,7 +22,7 @@ pub struct MultiHeadAttention<B: Backend> {
     value_weights: Linear<B>,
     head_dimesnion: usize,
     out_projection: Linear<B>,
-    mask: Tensor<B, 2, Bool>,
+    mask: Tensor<B, 4, Bool>,
     dropout: Dropout,
 }
 
@@ -37,7 +34,10 @@ impl<B: Backend> MultiHeadAttention<B> {
         let device = B::Device::default();
 
         let ones = Tensor::<B, 2>::ones([config.context_length, config.context_length], &device);
-        let mask = ones.triu(1).bool();
+        let mask =
+            ones.triu(1)
+                .bool()
+                .reshape([1, 1, config.context_length, config.context_length]);
 
         let out_projection =
             LinearConfig::new(config.output_dimensions, config.input_dimensions).init(&device);
@@ -55,17 +55,18 @@ impl<B: Backend> MultiHeadAttention<B> {
         }
     }
 
-    pub fn forward(&self, x: Tensor<B, 2>) -> Tensor<B, 2> {
-        let mut dims = x.shape().dims::<2>().to_vec();
-        let num_tokens = dims[1];
+    pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
+        let [batch_size, num_tokens, d_model] = x.shape().dims();
 
-        dims.push(self.head_dimesnion);
+        let num_heads = d_model / self.head_dimesnion;
 
-        let shape = Shape { dims: dims };
+        let shape = Shape {
+            dims: vec![batch_size, num_tokens, num_heads, self.head_dimesnion],
+        };
 
-        let query = self.query_weights.forward(x.clone()).reshape(shape.clone());
-        let key = self.key_weights.forward(x.clone()).reshape(shape.clone());
-        let value = self.value_weights.forward(x).reshape(shape);
+        let query: Tensor<B, 4> = self.query_weights.forward(x.clone()).reshape(shape.clone());
+        let key: Tensor<B, 4> = self.key_weights.forward(x.clone()).reshape(shape.clone());
+        let value: Tensor<B, 4> = self.value_weights.forward(x).reshape(shape);
 
         let query = query.swap_dims(1, 2);
         let key = key.swap_dims(1, 2);
@@ -74,7 +75,10 @@ impl<B: Backend> MultiHeadAttention<B> {
         let scale = (self.head_dimesnion as f64).sqrt();
 
         let mut attn_scores = query.matmul(key.swap_dims(2, 3)) / scale;
-        let mask = self.mask.clone().slice([..num_tokens, ..num_tokens]);
+        let mask: Tensor<B, 4, Bool> =
+            self.mask
+                .clone()
+                .slice([..1, ..1, ..num_tokens, ..num_tokens]);
 
         attn_scores = attn_scores.mask_fill(mask, NEG_INFINITY);
 
