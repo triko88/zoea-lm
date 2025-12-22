@@ -15,7 +15,7 @@ pub struct GPTConfig {
     pub num_layers: usize,
 
     #[config(default = 768)]
-    pub embedding_size: usize,
+    pub embedding_dims: usize,
 
     #[config(default = 0.0)]
     pub dropout: f64,
@@ -31,7 +31,7 @@ impl GPTConfig {
             .with_max_context_length(1024)
             .with_num_heads(12)
             .with_num_layers(24)
-            .with_embedding_size(768)
+            .with_embedding_dims(768)
             .with_dropout(0.0)
             .with_bias(false)
     }
@@ -42,7 +42,7 @@ impl GPTConfig {
             .with_max_context_length(256)
             .with_num_heads(4)
             .with_num_layers(4)
-            .with_embedding_size(128)
+            .with_embedding_dims(128)
             .with_dropout(0.0)
             .with_bias(false)
     }

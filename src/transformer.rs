@@ -43,6 +43,8 @@ pub struct TransformerConfig {
     pub context_length: usize,
     pub num_heads: usize,
     pub drop_rate: f64,
+
+    #[config(default = false)]
     pub bias: bool,
 }
 
@@ -56,7 +58,7 @@ pub struct TransformerBlock<B: Backend> {
 }
 
 impl<B: Backend> TransformerBlock<B> {
-    pub fn new(config: TransformerConfig, device: B::Device) -> Self {
+    pub fn new(config: TransformerConfig, device: &B::Device) -> Self {
         let attn_condig = MultiHeadAttentionConfig::new()
             .with_input_dimensions(config.embedding_dims)
             .with_output_dimensions(config.embedding_dims)
@@ -66,10 +68,10 @@ impl<B: Backend> TransformerBlock<B> {
             .with_bias(config.bias);
 
         let attention = MultiHeadAttention::new(attn_condig);
-        let feed_forward = FeedForward::new(config.embedding_dims, &device);
+        let feed_forward = FeedForward::new(config.embedding_dims, device);
 
-        let normal1 = LayerNormConfig::new(config.embedding_dims).init(&device);
-        let normal2 = LayerNormConfig::new(config.embedding_dims).init(&device);
+        let normal1 = LayerNormConfig::new(config.embedding_dims).init(device);
+        let normal2 = LayerNormConfig::new(config.embedding_dims).init(device);
 
         let drop_shortcut = DropoutConfig::new(config.drop_rate).init();
 
